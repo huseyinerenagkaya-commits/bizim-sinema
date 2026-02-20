@@ -4,14 +4,17 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Bizim Sinema Odası</title>
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
     <script src="/socket.io/socket.io.js"></script>
     <style>
         body { background-color: #1a1a1a; color: white; font-family: sans-serif; text-align: center; padding: 20px; }
-        .kutu { background-color: #333; padding: 15px; border-radius: 10px; margin-bottom: 20px; display: inline-block; width: 80%; max-width: 600px; }
-        input { width: 90%; padding: 10px; border-radius: 5px; border: none; margin-top: 10px; }
-        video { width: 100%; max-width: 800px; border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.5); background: black; }
+        .kutu { background-color: #333; padding: 20px; border-radius: 10px; margin-bottom: 20px; display: inline-block; width: 80%; max-width: 600px; box-shadow: 0 4px 10px rgba(0,0,0,0.5); }
+        input { width: 90%; padding: 12px; border-radius: 5px; border: none; margin-top: 10px; font-size: 14px; }
+        button { width: 95%; padding: 15px; margin-top: 15px; background-color: #e50914; color: white; border: none; border-radius: 5px; font-size: 16px; font-weight: bold; cursor: pointer; box-shadow: 0 4px 6px rgba(0,0,0,0.3); }
+        button:active { background-color: #b20710; transform: scale(0.98); }
+        video { width: 100%; max-width: 800px; border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.5); background: black; margin-top: 10px; }
         .container { display: flex; flex-direction: column; align-items: center; }
-        #icerik { display: none; } /* Şifre girilmeden önce içeriği gizler */
+        #icerik { display: none; }
     </style>
 </head>
 <body>
@@ -20,56 +23,77 @@
         <h2>🍿 Baş Başa Sinema Odası</h2>
         <div class="container">
             <div class="kutu">
-                <label>İzlenecek Filmin Linkini Buraya Yapıştırın (.mp4):</label>
-                <input type="text" id="videoUrl" placeholder="Örn: https://site.com/film.mp4">
+                <label>Bulduğunuz Yayın Linkini Buraya Yapıştırın (.mp4 veya .m3u8):</label>
+                <input type="text" id="videoUrl" placeholder="Örn: https://site.com/film.m3u8">
+                <button id="yukleBtn">🎬 Filmi İkimiz İçin de Yükle</button>
             </div>
             <video id="player" controls>
-                <source id="videoSource" src="" type="video/mp4">
+                <source id="videoSource" src="">
             </video>
         </div>
     </div>
 
     <script>
-        // --- ŞİFRE KONTROL SİSTEMİ ---
-        const gizliSifre = "2026"; // Buradaki 2026 yerine istediğin şifreyi yazabilirsin
+        // Şifre Sistemi
+        const gizliSifre = "2026"; 
         const kayitliSifre = localStorage.getItem("sinemaSifre");
 
         if (kayitliSifre !== gizliSifre) {
             let girilen = prompt("Siteye giriş için şifreyi girin:");
             if (girilen === gizliSifre) {
-                // Şifre doğruysa cihaza kaydet ve içeriği göster
                 localStorage.setItem("sinemaSifre", girilen);
                 document.getElementById("icerik").style.display = "block";
             } else {
-                // Şifre yanlışsa sayfayı kitle
                 document.body.innerHTML = "<h2 style='color:red; text-align:center; margin-top:50px;'>Yanlış şifre! Sayfayı yenileyip tekrar deneyin.</h2>";
                 throw new Error("Yanlış şifre girildi."); 
             }
         } else {
-            // Cihaz şifreyi zaten hatırlıyorsa direkt içeriği göster
             document.getElementById("icerik").style.display = "block";
         }
 
-        // --- VİDEO SENKRONİZASYON KODLARI ---
+        // --- YENİ VİDEO OYNATMA SİSTEMİ (M3U8 VE MP4 DESTEKLİ) ---
         const socket = io();
         const video = document.getElementById('player');
         const videoUrl = document.getElementById('videoUrl');
         const videoSource = document.getElementById('videoSource');
+        const yukleBtn = document.getElementById('yukleBtn');
         let disaridanGeldi = false;
+        let hls; // HLS objesini hafızada tutmak için
 
-        videoUrl.addEventListener('change', () => {
+        function videoyuCalistir(url) {
+            if (url.includes('.m3u8')) {
+                if (Hls.isSupported()) {
+                    if (hls) hls.destroy(); // Eski filmi temizle
+                    hls = new Hls();
+                    hls.loadSource(url);
+                    hls.attachMedia(video);
+                } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+                    // Apple cihazları için özel durum
+                    video.src = url;
+                }
+            } else {
+                // Klasik MP4 linki ise
+                if (hls) hls.destroy();
+                videoSource.src = url;
+                video.load();
+            }
+        }
+
+        yukleBtn.addEventListener('click', () => {
             const url = videoUrl.value;
-            socket.emit('link_degisti', url);
-            videoSource.src = url;
-            video.load();
+            if (url) {
+                socket.emit('link_degisti', url);
+                videoyuCalistir(url);
+                alert("Film karşı tarafa gönderildi! Başlatabilirsiniz.");
+            }
         });
 
         socket.on('link_degisti', (url) => {
             videoUrl.value = url;
-            videoSource.src = url;
-            video.load();
+            videoyuCalistir(url);
         });
 
+        // Senkronizasyon Kodları
         video.addEventListener('play', () => { if (!disaridanGeldi) socket.emit('oynat', video.currentTime); disaridanGeldi = false; });
         socket.on('oynat', (zaman) => { disaridanGeldi = true; if (Math.abs(video.currentTime - zaman) > 1) video.currentTime = zaman; video.play(); });
 
