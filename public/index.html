@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bizim Sinema Odası</title>
+    <script src="/socket.io/socket.io.js"></script>
+    <style>
+        body { background-color: #1a1a1a; color: white; font-family: sans-serif; text-align: center; padding: 20px; }
+        .kutu { background-color: #333; padding: 15px; border-radius: 10px; margin-bottom: 20px; display: inline-block; width: 80%; max-width: 600px; }
+        input { width: 90%; padding: 10px; border-radius: 5px; border: none; margin-top: 10px; }
+        video { width: 100%; max-width: 800px; border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.5); background: black; }
+        .container { display: flex; flex-direction: column; align-items: center; }
+        #icerik { display: none; } /* Şifre girilmeden önce içeriği gizler */
+    </style>
+</head>
+<body>
+
+    <div id="icerik">
+        <h2>🍿 Baş Başa Sinema Odası</h2>
+        <div class="container">
+            <div class="kutu">
+                <label>İzlenecek Filmin Linkini Buraya Yapıştırın (.mp4):</label>
+                <input type="text" id="videoUrl" placeholder="Örn: https://site.com/film.mp4">
+            </div>
+            <video id="player" controls>
+                <source id="videoSource" src="" type="video/mp4">
+            </video>
+        </div>
+    </div>
+
+    <script>
+        // --- ŞİFRE KONTROL SİSTEMİ ---
+        const gizliSifre = "2026"; // Buradaki 2026 yerine istediğin şifreyi yazabilirsin
+        const kayitliSifre = localStorage.getItem("sinemaSifre");
+
+        if (kayitliSifre !== gizliSifre) {
+            let girilen = prompt("Siteye giriş için şifreyi girin:");
+            if (girilen === gizliSifre) {
+                // Şifre doğruysa cihaza kaydet ve içeriği göster
+                localStorage.setItem("sinemaSifre", girilen);
+                document.getElementById("icerik").style.display = "block";
+            } else {
+                // Şifre yanlışsa sayfayı kitle
+                document.body.innerHTML = "<h2 style='color:red; text-align:center; margin-top:50px;'>Yanlış şifre! Sayfayı yenileyip tekrar deneyin.</h2>";
+                throw new Error("Yanlış şifre girildi."); 
+            }
+        } else {
+            // Cihaz şifreyi zaten hatırlıyorsa direkt içeriği göster
+            document.getElementById("icerik").style.display = "block";
+        }
+
+        // --- VİDEO SENKRONİZASYON KODLARI ---
+        const socket = io();
+        const video = document.getElementById('player');
+        const videoUrl = document.getElementById('videoUrl');
+        const videoSource = document.getElementById('videoSource');
+        let disaridanGeldi = false;
+
+        videoUrl.addEventListener('change', () => {
+            const url = videoUrl.value;
+            socket.emit('link_degisti', url);
+            videoSource.src = url;
+            video.load();
+        });
+
+        socket.on('link_degisti', (url) => {
+            videoUrl.value = url;
+            videoSource.src = url;
+            video.load();
+        });
+
+        video.addEventListener('play', () => { if (!disaridanGeldi) socket.emit('oynat', video.currentTime); disaridanGeldi = false; });
+        socket.on('oynat', (zaman) => { disaridanGeldi = true; if (Math.abs(video.currentTime - zaman) > 1) video.currentTime = zaman; video.play(); });
+
+        video.addEventListener('pause', () => { if (!disaridanGeldi) socket.emit('durdur', video.currentTime); disaridanGeldi = false; });
+        socket.on('durdur', (zaman) => { disaridanGeldi = true; video.currentTime = zaman; video.pause(); });
+
+        video.addEventListener('seeked', () => { if (!disaridanGeldi) socket.emit('sar', video.currentTime); disaridanGeldi = false; });
+        socket.on('sar', (zaman) => { disaridanGeldi = true; video.currentTime = zaman; });
+    </script>
+</body>
+</html>
